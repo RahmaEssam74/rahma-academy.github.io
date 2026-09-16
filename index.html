@@ -431,7 +431,6 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
 
 
         // ===== الربط السحابي مع Google Sheets =====
-        // بعد نشر Google Apps Script كـ Web App، ضعي الرابط هنا.
         const CLOUD_API_URL = "https://script.google.com/macros/s/AKfycbz7Zqzj9lKN5YfXA4n7os4Sv5vOOadvxJLHy3ypfxtR9ImIpdy0vW8MQYIOcavuhcgM/exec";
         const CLOUD_API_TOKEN = "CHANGE-ME-RAHMA-2026";
 
@@ -631,7 +630,6 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             lessonAccess: {}
         };
 
-        // توافق تلقائي مع النسخ القديمة — تهيئة آمنة قبل استخدام أي مصفوفة
         db = db || {};
         db.lessons = Array.isArray(db.lessons) ? db.lessons : [];
         db.students = Array.isArray(db.students) ? db.students : [];
@@ -756,7 +754,6 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             evt.currentTarget.classList.add('active');
         }
 
-        // --- إدارة ملاحظات المعلمة عن الطالبات ---
         function renderTeacherNotesTab() {
             let container = document.getElementById("teacher-notes-container");
             container.innerHTML = "";
@@ -1147,7 +1144,6 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             const key=accessKey(student, lesson);
             if(!db.lessonAccess[key]) db.lessonAccess[key]={studentId:student.id||student.name, studentName:student.name, lessonTitle:lesson.title, code:makeLessonCode(), unlocked:false, unlockedAt:null};
             if(!db.lessonAccess[key].code) db.lessonAccess[key].code=makeLessonCode();
-            // إرسال/تحديث الكود في الشيت بدون تعطيل المنصة.
             syncLessonCodeToCloud(student, lesson, db.lessonAccess[key]);
             return db.lessonAccess[key];
         }
@@ -1195,7 +1191,6 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
 أدخلي كود هذا الدرس الذي أرسلته لكِ مس رحمة:`);
             if(entered===null) return false;
 
-            // عند وجود الربط السحابي، الشيت هو مصدر التحقق والتسجيل.
             if(cloudEnabled()){
                 const result = await cloudVerifyAndLogLesson(student, lesson, entered);
                 if(result && result.ok && result.valid){
@@ -1217,7 +1212,6 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
                 return false;
             }
 
-            // وضع احتياطي محلي إذا لم يتم إعداد رابط الشيت بعد.
             if(normalizeCode(entered)===normalizeCode(a.code)){
                 a.unlocked=true; a.unlockedAt=new Date().toISOString();
                 persist(); logActivity(`تم فتح الدرس ${lesson.title} للطالبة ${student.name}`);
@@ -1343,11 +1337,12 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
 
             questions.forEach((q, idx) => {
                 let s = q.score || 1;
+                let optionsString = q.optionsArray ? q.optionsArray.join(', ') : '';
                 htmlContent += `
                     <div class="question-card">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.2rem; gap:1rem;">
                             <strong style="font-size:1.05rem;">السؤال ${idx + 1} (${s} درجة): ${q.text}</strong>
-                            <button class="speak-btn" onclick="speakText('${q.text.replace(/'/g, "\\'")}')">🔊 استماع</button>
+                            <button class="speak-btn" onclick="speakText('${q.text.replace(/'/g, "\\'")}', '${optionsString.replace(/'/g, "\\'")}')">🔊 استماع</button>
                         </div>
                 `;
 
@@ -1454,11 +1449,12 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             qArea.innerHTML = "";
             exam.questions.forEach((q, idx) => {
                 let s = q.score || 1;
+                let optionsString = q.optionsArray ? q.optionsArray.join(', ') : '';
                 let html = `
                     <div class="question-card">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.2rem; gap:1rem;">
                             <strong style="font-size:1.05rem;">سؤال الاختبار ${idx + 1} (${s} درجة): ${q.text}</strong>
-                            <button class="speak-btn" onclick="speakText('${q.text.replace(/'/g, "\\'")}')">🔊 استماع</button>
+                            <button class="speak-btn" onclick="speakText('${q.text.replace(/'/g, "\\'")}', '${optionsString.replace(/'/g, "\\'")}')">🔊 استماع</button>
                         </div>
                 `;
                 if (q.type === 'mcq' || q.type === 'brackets') {
@@ -1689,10 +1685,14 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             let c=document.getElementById('student-dashboard-card');if(!c||!currentUser)return;let rs=(db.reports||[]).filter(r=>r.studentName===currentUser.name),avg=rs.length?Math.round(rs.reduce((a,r)=>a+(+r.percentage||0),0)/rs.length):0, lessons=db.lessons.filter(l=>l.grade===currentUser.grade), done=new Set(rs.map(r=>r.lessonTitle)).size, progress=lessons.length?Math.round(done/lessons.length*100):0, ach=db.achievements?.[currentUser.name]||[];let msg=avg>=90?'🌟 أداء رائع! استمري بهذا المستوى.':avg>=75?'👏 مستواك جيد جدًا، واصلي التقدم.':avg>=50?'💪 أنتِ على الطريق الصحيح، ركزي على المراجعة.':'📚 ابدئي بمراجعة الدروس والتدريبات خطوة بخطوة.';c.innerHTML=`<h3 style="color:var(--primary);font-weight:900;margin-bottom:.5rem">${msg}</h3><div class="dashboard-grid"><div class="stat-card"><div class="stat-value">${avg}%</div><div class="stat-label">متوسط نتائجك</div></div><div class="stat-card"><div class="stat-value">${done}/${lessons.length}</div><div class="stat-label">دروس لها نتائج</div></div><div class="stat-card"><div class="stat-value">${rs.length}</div><div class="stat-label">اختبارات مكتملة</div></div></div><div style="font-weight:800;margin:.6rem 0">تقدمك في المرحلة</div><div class="progress-track"><div class="progress-fill" style="width:${progress}%"></div></div><div style="margin-top:.8rem">${ach.map(a=>`<span class="badge-pill">${a}</span>`).join('')||'<span class="badge-pill">🎯 ابدئي أول اختبار لتحصلي على شارات</span>'}</div>`;
         }
 
-        function speakText(text) {
+        function speakText(text, optionsText = "") {
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
-                let utterance = new SpeechSynthesisUtterance(text);
+                let fullText = text;
+                if (optionsText) {
+                    fullText += ". الاختيارات هي: " + optionsText;
+                }
+                let utterance = new SpeechSynthesisUtterance(fullText);
                 utterance.lang = 'en-GB';
                 utterance.rate = 0.45;
                 window.speechSynthesis.speak(utterance);
