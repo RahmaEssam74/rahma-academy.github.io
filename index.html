@@ -94,6 +94,11 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
         .chart-row{display:grid;grid-template-columns:170px 1fr 65px;align-items:center;gap:.7rem;margin:.7rem 0}.chart-label{font-weight:800;font-size:.86rem}.chart-value{font-weight:900;color:var(--primary);text-align:left}
         .print-only{display:none}
         @media print{body{background:#fff!important}header,#login-screen,.teacher-tabs,.backup-box,.btn,.top-bar{display:none!important}.role-section{box-shadow:none!important;border:0!important;padding:0!important}.t-content{display:none!important}.t-content.print-active{display:block!important}.print-only{display:block}.no-print{display:none!important}}
+
+        .access-modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.68);z-index:3000;display:flex;align-items:center;justify-content:center;padding:1rem}
+        .access-modal-card{background:var(--card-bg);width:min(1000px,96vw);max-height:88vh;overflow:auto;border-radius:22px;padding:1.4rem;border:1px solid var(--border-color);box-shadow:0 24px 70px rgba(0,0,0,.25)}
+        .access-modal-head{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin-bottom:1rem}.access-modal-head h3{color:var(--primary);margin:0;font-weight:900}.access-note{color:var(--text-muted);font-weight:600}.access-actions{display:flex;gap:.7rem;flex-wrap:wrap;margin:1rem 0}.access-table{border:1px solid var(--border-color);border-radius:14px;overflow:hidden}.access-row{display:grid;grid-template-columns:1.5fr 1fr 1fr .7fr;gap:.7rem;align-items:center;padding:.8rem 1rem;border-bottom:1px solid var(--border-color)}.access-row:last-child{border-bottom:0}.access-header{font-weight:900;background:var(--bg-main)}.access-row code{font-size:1rem;font-weight:900;letter-spacing:1px}.mini-btn{padding:.35rem .7rem!important;font-size:.8rem!important}.lesson-status{float:left;font-size:.75rem;padding:.25rem .55rem;border-radius:999px;background:#dcfce7;color:#166534}.locked-status{background:#fef3c7;color:#92400e}
+        @media(max-width:700px){.access-row{grid-template-columns:1fr 1fr;}.access-header{display:none}}
 </style>
 </head>
 <body id="page-body">
@@ -146,6 +151,14 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
                         <input type="file" accept=".json" onchange="importBackup(event)" style="display: none;">
                     </label>
                 </div>
+            </div>
+
+            <div class="smart-box" style="margin-bottom:1.5rem;">
+                <h3 style="color:var(--primary);font-weight:900;margin-bottom:.4rem;">☁️ حالة الربط مع شيت الأكواد</h3>
+                <p id="cloud-status-text" style="color:var(--text-muted);font-weight:700;margin-bottom:.8rem;">
+                    جاري فحص إعداد الربط...
+                </p>
+                <button class="btn btn-secondary" type="button" onclick="checkCloudStatus()">🔄 فحص الربط</button>
             </div>
 
             <div class="teacher-tabs">
@@ -305,7 +318,8 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
                         <label>كلمة المرور:</label>
                         <input type="text" id="stu-pass" placeholder="مثال: 1234" required>
                     </div>
-                    <button type="submit" class="btn btn-success">إضافة الطالبة</button>
+                    <button type="submit" class="btn btn-success">إضافة الطالبة وحفظها في الشيت</button>
+                    <p style="margin:.7rem 0 0;color:var(--text-muted);font-size:.85rem;">تُحفظ الطالبة داخل المنصة وتُرسل تلقائيًا إلى شيت «الطالبات» عند تفعيل الربط.</p>
                 </form>
                 <div class="search-row" style="margin-top:1.5rem;">
                     <input id="student-search" type="search" placeholder="🔎 بحث باسم الطالبة..." oninput="renderStudentsList(this.value)">
@@ -406,12 +420,203 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
         </div>
     </div>
 
+    <div id="lesson-access-modal" class="hidden access-modal-overlay"></div>
+
     <script>
         const allGrades = [
             "الرابع الابتدائي", "الخامس الابتدائي", "السادس الابتدائي",
             "الأول الإعدادي", "الثاني الإعدادي", "الثالث الإعدادي",
             "الأول الثانوي", "الثاني الثانوي", "البكالوريا"
         ];
+
+
+        // ===== الربط السحابي مع Google Sheets =====
+        // بعد نشر Google Apps Script كـ Web App، ضعي الرابط هنا.
+        const CLOUD_API_URL = "https://script.google.com/macros/s/AKfycbz7Zqzj9lKN5YfXA4n7os4Sv5vOOadvxJLHy3ypfxtR9ImIpdy0vW8MQYIOcavuhcgM/exec";
+        const CLOUD_API_TOKEN = "CHANGE-ME-RAHMA-2026";
+
+        function cloudEnabled(){ return !!(CLOUD_API_URL && CLOUD_API_URL.startsWith("http")); }
+
+        async function cloudPost(payload){
+            if(!cloudEnabled()) return {ok:false, disabled:true};
+            try{
+                const res = await fetch(CLOUD_API_URL, {
+                    method:"POST",
+                    headers:{"Content-Type":"text/plain;charset=utf-8"},
+                    body: JSON.stringify({...payload, token:CLOUD_API_TOKEN})
+                });
+                return await res.json();
+            }catch(err){
+                console.warn("Cloud API error:", err);
+                return {ok:false, error:String(err)};
+            }
+        }
+
+        async function syncStudentToCloud(student){
+            if(!cloudEnabled()) return {ok:false, disabled:true};
+            return await cloudPost({
+                action:'upsertStudent',
+                studentId: student.id || student.name,
+                studentName: student.name || '',
+                grade: student.grade || '',
+                password: student.pass || '',
+                status: 'نشطة'
+            });
+        }
+
+        async function syncStudentsFromCloud(){
+            if(!cloudEnabled()) return {ok:false, disabled:true};
+            const result = await cloudPost({action:'getStudents'});
+            if(result && result.ok && Array.isArray(result.items)){
+                result.items.forEach(item=>{
+                    const id = item.id || item.studentId || '';
+                    let st = db.students.find(s => id && s.id === id);
+                    if(!st) st = db.students.find(s => (s.name||'') === (item.name||item.studentName||'') && s.grade === (item.grade||''));
+                    if(st){
+                        st.id = st.id || id || makeStudentId();
+                        st.name = item.name || item.studentName || st.name;
+                        st.grade = item.grade || st.grade;
+                        if(item.password != null && String(item.password) !== '') st.pass = String(item.password);
+                    } else {
+                        db.students.push({id:id || makeStudentId(), name:item.name || item.studentName || '', grade:item.grade || '', pass:item.password == null ? '' : String(item.password)});
+                    }
+                });
+                persist();
+                renderStudentsList();
+                renderTeacherNotesTab();
+            }
+            return result || {ok:false,error:'لم يصل رد من الشيت'};
+        }
+
+        async function verifyStudentLoginCloud(name, pass){
+            if(!cloudEnabled()) return {ok:false, disabled:true};
+            return await cloudPost({action:"verifyStudentLogin", studentName:name, password:pass});
+        }
+
+        async function syncLessonsFromCloud(){
+            if(!cloudEnabled()) return {ok:false, disabled:true};
+            const result = await cloudPost({action:"getLessons"});
+            if(result && result.ok && Array.isArray(result.items)){
+                result.items.forEach(item=>{
+                    const id = item.id || ('LESSON-' + btoa(unescape(encodeURIComponent((item.grade||'')+'|'+(item.title||'')))).replace(/[^A-Z0-9]/gi,'').slice(0,24));
+                    let lesson = db.lessons.find(l => l.id && l.id === id);
+                    if(!lesson) lesson = db.lessons.find(l => l.title === item.title && l.grade === item.grade);
+                    let questions = [];
+                    let examQuestions = [];
+                    try { questions = JSON.parse(item.questionsJson || '[]'); } catch(e) {}
+                    try { examQuestions = JSON.parse(item.examQuestionsJson || '[]'); } catch(e) {}
+                    if(lesson){
+                        const localFileData = lesson.fileData || null;
+                        const localFileType = lesson.fileType || item.fileType || null;
+                        lesson.id = id;
+                        lesson.grade = item.grade || lesson.grade;
+                        lesson.title = item.title || lesson.title;
+                        lesson.content = item.content || '';
+                        lesson.questions = Array.isArray(questions) ? questions : [];
+                        lesson.exam = {durationMinutes:Number(item.durationMinutes || 10), questions:Array.isArray(examQuestions) ? examQuestions : []};
+                        lesson.fileData = localFileData;
+                        lesson.fileType = localFileType;
+                        lesson.fileName = item.fileName || lesson.fileName || '';
+                        lesson.fileId = item.fileId || lesson.fileId || '';
+                        lesson.fileUrl = item.fileUrl || lesson.fileUrl || '';
+                    } else {
+                        db.lessons.push({
+                            id,
+                            grade:item.grade||'',
+                            title:item.title||'',
+                            content:item.content||'',
+                            fileData:null,
+                            fileId:item.fileId||'',
+                            fileUrl:item.fileUrl||'',
+                            fileType:item.fileType||null,
+                            fileName:item.fileName||'',
+                            questions:Array.isArray(questions)?questions:[],
+                            exam:{durationMinutes:Number(item.durationMinutes||10), questions:Array.isArray(examQuestions)?examQuestions:[]}
+                        });
+                    }
+                });
+                persist();
+                renderTeacherManage();
+            }
+            return result || {ok:false,error:'لم يصل رد من الشيت'};
+        }
+
+        async function deleteLessonFromCloud(lesson){
+            if(!cloudEnabled() || !lesson) return {ok:false,disabled:true};
+            return await cloudPost({action:'deleteLesson', lessonId:lesson.id});
+        }
+
+        async function syncLessonToCloud(lesson, fileName=""){
+            if(!cloudEnabled()) return {ok:false, disabled:true};
+            lesson.id = lesson.id || ('LESSON-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2,6).toUpperCase());
+            return await cloudPost({
+                action:"upsertLesson",
+                lessonId: lesson.id,
+                grade: lesson.grade || "",
+                title: lesson.title || "",
+                content: lesson.content || "",
+                questionsJson: JSON.stringify(lesson.questions || []),
+                durationMinutes: lesson.exam?.durationMinutes || 10,
+                examQuestionsJson: JSON.stringify(lesson.exam?.questions || []),
+                fileType: lesson.fileType || "",
+                fileName: fileName || lesson.fileName || "",
+                fileData: lesson.fileData || "",
+                fileId: lesson.fileId || "",
+                fileUrl: lesson.fileUrl || ""
+            });
+        }
+
+        async function syncLessonCodeToCloud(student, lesson, access){
+            if(!cloudEnabled()) return;
+            await cloudPost({
+                action:"upsertCode",
+                studentId: student.id || student.name,
+                studentName: student.name,
+                grade: student.grade,
+                lessonTitle: lesson.title,
+                code: access.code,
+                unlocked: !!access.unlocked,
+                unlockedAt: access.unlockedAt || ""
+            });
+        }
+
+        async function syncStudentAccessFromCloud(student){
+            if(!cloudEnabled()) return;
+            const result = await cloudPost({
+                action:"getStudentAccess",
+                studentId: student.id || student.name,
+                studentName: student.name,
+                grade: student.grade
+            });
+            if(result && result.ok && Array.isArray(result.items)){
+                result.items.forEach(item=>{
+                    const lesson = db.lessons.find(l => l.title === item.lessonTitle && l.grade === student.grade);
+                    if(!lesson) return;
+                    const key = accessKey(student, lesson);
+                    db.lessonAccess[key] = {
+                        studentId: student.id || student.name,
+                        studentName: student.name,
+                        lessonTitle: lesson.title,
+                        code: item.code || "",
+                        unlocked: !!item.unlocked,
+                        unlockedAt: item.unlockedAt || null
+                    };
+                });
+                persist();
+            }
+        }
+
+        async function cloudVerifyAndLogLesson(student, lesson, enteredCode){
+            if(!cloudEnabled()) return {ok:false, disabled:true};
+            return await cloudPost({
+                action:"verifyCode",
+                studentId: student.id || student.name,
+                studentName: student.name,
+                grade: student.grade,
+                lessonTitle: lesson.title,
+                enteredCode: enteredCode
+            });
+        }
 
         let db = JSON.parse(localStorage.getItem('ms_rahma_academy_db')) || {
             lessons: [],
@@ -421,16 +626,27 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             teacherNotes: {},
             attendance: {},
             activityLog: [],
-            teacherPassword: '1234',
-            achievements: {}
+            teacherPassword: '271120',
+            achievements: {},
+            lessonAccess: {}
         };
 
-        // توافق تلقائي مع النسخ القديمة
-        db.reports = db.reports || []; db.questionBank = db.questionBank || []; db.teacherNotes = db.teacherNotes || {};
-        db.attendance = db.attendance || {}; db.activityLog = db.activityLog || []; db.achievements = db.achievements || {};
-        db.teacherPassword = db.teacherPassword || '1234';
-        db.students = db.students || []; db.lessons = db.lessons || [];
+        // توافق تلقائي مع النسخ القديمة — تهيئة آمنة قبل استخدام أي مصفوفة
+        db = db || {};
+        db.lessons = Array.isArray(db.lessons) ? db.lessons : [];
+        db.students = Array.isArray(db.students) ? db.students : [];
+        db.reports = Array.isArray(db.reports) ? db.reports : [];
+        db.questionBank = Array.isArray(db.questionBank) ? db.questionBank : [];
+        db.teacherNotes = db.teacherNotes || {};
+        db.attendance = db.attendance || {};
+        db.activityLog = Array.isArray(db.activityLog) ? db.activityLog : [];
+        db.achievements = db.achievements || {};
+        db.teacherPassword = db.teacherPassword || '271120';
+        db.lessonAccess = db.lessonAccess || {};
+        function makeStudentId(){ return 'STU-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2,6).toUpperCase(); }
+        db.students.forEach(s => { s.id = s.id || makeStudentId(); });
         function persist(){ localStorage.setItem('ms_rahma_academy_db', JSON.stringify(db)); }
+        persist();
         function logActivity(text){ db.activityLog.unshift({text,date:new Date().toLocaleString('ar-EG')}); db.activityLog=db.activityLog.slice(0,200); persist(); }
 
         let currentUser = null;
@@ -442,6 +658,13 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
         let tempBuilderQuestions = [];
         let tempBuilderTest = [];
 
+        function checkCloudStatus(){
+            const el=document.getElementById('cloud-status-text');
+            if(!el) return;
+            el.innerText = cloudEnabled()
+                ? '🟢 الربط مفعل: الأكواد والاستخدام والدروس التي تُنشأ من تبويب صناعة الدروس تتم مزامنتها مع الشيت.'
+                : '🟡 لم يتم وضع رابط Google Apps Script بعد. المنصة تعمل محلياً ولن تسجل الاستخدام في الشيت حتى يتم وضع الرابط.';
+        }
         function toggleTheme() {
             let body = document.getElementById("page-body");
             body.classList.toggle("dark-mode");
@@ -456,7 +679,7 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             else nameBox.classList.add('hidden');
         }
 
-        function handleLogin(e) {
+        async function handleLogin(e) {
             e.preventDefault();
             let type = document.getElementById("login-type").value;
             let pass = document.getElementById("login-pass").value;
@@ -466,25 +689,39 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
                     currentUser = { role: 'teacher', name: 'مس رحمة' };
                     document.getElementById("login-screen").classList.add("hidden");
                     document.getElementById("teacher-section").classList.remove("hidden");
-                    renderTeacherManage();
-                    renderStudentsList();
-                    renderTeacherReports();
-                    renderTeacherNotesTab();
-                    renderBankList();
-                    renderTeacherDashboard(); renderAttendance(); renderActivityLog();
+                    renderTeacherManage(); renderStudentsList(); renderTeacherReports(); renderTeacherNotesTab();
+                    renderBankList(); renderTeacherDashboard(); renderAttendance(); renderActivityLog();
+                    if(cloudEnabled()){
+                        const results = await Promise.allSettled([syncStudentsFromCloud(), syncLessonsFromCloud()]);
+                        renderTeacherManage(); renderStudentsList(); renderTeacherDashboard();
+                        const failed = results.some(r => r.status === 'rejected' || (r.value && r.value.ok === false));
+                        if(failed) console.warn('تعذر تحديث بعض بيانات الشيت.');
+                    }
                 } else {
-                    alert("كلمة مرور المعلمة غير صحيحة! (جربي 1234)");
+                    alert("كلمة مرور المعلمة غير صحيحة! (جربي 271120)");
                 }
             } else if (type === 'student') {
                 let name = document.getElementById("login-student-name").value.trim();
                 let studentObj = db.students.find(s => s.name === name && s.pass === pass);
+                if (!studentObj && cloudEnabled()) {
+                    const cloud = await verifyStudentLoginCloud(name, pass);
+                    if(cloud && cloud.ok && cloud.valid && cloud.student){
+                        const cs = cloud.student;
+                        studentObj = db.students.find(s => s.id === cs.id) || db.students.find(s => s.name === cs.name && s.grade === cs.grade);
+                        if(studentObj){ Object.assign(studentObj, {id:cs.id||studentObj.id, name:cs.name, grade:cs.grade, pass:cs.password}); }
+                        else { studentObj = {id:cs.id || makeStudentId(), name:cs.name, grade:cs.grade, pass:cs.password}; db.students.push(studentObj); }
+                        persist();
+                    }
+                }
                 if (studentObj) {
-                    currentUser = { role: 'student', name: studentObj.name, grade: studentObj.grade };
+                    currentUser = { role: 'student', name: studentObj.name, grade: studentObj.grade, id: studentObj.id };
                     document.getElementById("login-screen").classList.add("hidden");
                     document.getElementById("portal-section").classList.remove("hidden");
                     document.getElementById("portal-welcome-msg").innerText = `أهلاً بكِ يا ${studentObj.name} (${studentObj.grade})`;
-                    renderStudentDashboard();
-                    renderGradesPortal();
+                    if(cloudEnabled()) await syncLessonsFromCloud();
+                    renderStudentDashboard(); renderGradesPortal();
+                    await syncStudentAccessFromCloud(studentObj);
+                    renderGradesPortal(); renderStudentDashboard();
                 } else {
                     alert("اسم الطالبة أو كلمة المرور غير صحيحة!");
                 }
@@ -686,21 +923,25 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             else { tempBuilderTest.splice(idx, 1); renderBuilderTest(); }
         }
 
-        function saveFullLesson(e) {
+        async function saveFullLesson(e) {
             e.preventDefault();
-            let editIdx = parseInt(document.getElementById("edit-lesson-index").value);
-            let grade = document.getElementById("new-lesson-grade").value;
-            let title = document.getElementById("new-lesson-title").value;
-            let content = document.getElementById("new-lesson-content").value;
-            let duration = parseInt(document.getElementById("test-duration").value) || 10;
-            let fileInput = document.getElementById("new-lesson-file");
+            const editIdx = parseInt(document.getElementById('edit-lesson-index').value);
+            const grade = document.getElementById('new-lesson-grade').value;
+            const title = document.getElementById('new-lesson-title').value.trim();
+            const content = document.getElementById('new-lesson-content').value;
+            const duration = parseInt(document.getElementById('test-duration').value) || 10;
+            const fileInput = document.getElementById('new-lesson-file');
+            const oldLesson = editIdx >= 0 ? db.lessons[editIdx] : null;
+            const lessonId = oldLesson?.id || ('LESSON-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2,6).toUpperCase());
 
             let lessonObj = {
+                id: lessonId,
                 grade,
                 title,
                 content,
-                fileData: editIdx >= 0 ? db.lessons[editIdx].fileData : null,
-                fileType: editIdx >= 0 ? db.lessons[editIdx].fileType : null,
+                fileData: oldLesson ? oldLesson.fileData : null,
+                fileType: oldLesson ? oldLesson.fileType : null,
+                fileName: oldLesson ? (oldLesson.fileName || '') : '',
                 questions: tempBuilderQuestions.map(q => ({ ...q, score: q.score || 1, optionsArray: q.options ? q.options.split(',').map(o => o.trim()) : [] })),
                 exam: {
                     durationMinutes: duration,
@@ -708,32 +949,41 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
                 }
             };
 
-            let processSave = (fileData, fileType) => {
+            const processSave = async (fileData, fileType) => {
                 if (fileData) {
                     lessonObj.fileData = fileData;
                     lessonObj.fileType = fileType;
                 }
-                if (editIdx >= 0) {
-                    db.lessons[editIdx] = lessonObj;
-                    alert("تم تعديل الدرس بنجاح!");
-                } else {
-                    db.lessons.push(lessonObj);
-                    alert("تم حفظ وترحيل الدرس بنجاح!");
-                }
+                if (fileInput.files && fileInput.files[0]) lessonObj.fileName = fileInput.files[0].name;
+
+                if (editIdx >= 0 && db.lessons[editIdx]) db.lessons[editIdx] = lessonObj;
+                else db.lessons.push(lessonObj);
                 persist();
-                logActivity((editIdx >= 0 ? 'تم تعديل الدرس: ' : 'تم إضافة الدرس: ') + title);
+
+                const actionText = editIdx >= 0 ? 'تم تعديل الدرس: ' : 'تم إضافة الدرس: ';
+                if (cloudEnabled()) {
+                    const result = await syncLessonToCloud(lessonObj, lessonObj.fileName);
+                    if (!result || !result.ok) {
+                        renderTeacherManage();
+                        alert('تم حفظ الدرس داخل المنصة، لكن لم يتم تحديث شيت «الدروس».\n\nالسبب: ' + (result?.error || 'تعذر الاتصال بالشيت') + '\n\nالبيانات المحلية محفوظة ولم يتم حذفها.');
+                        return;
+                    }
+                }
+
+                logActivity(actionText + title);
                 resetLessonForm();
                 renderTeacherManage();
+                alert(cloudEnabled()
+                    ? (editIdx >= 0 ? 'تم تعديل الدرس وتحديث شيت «الدروس» بنجاح.' : 'تم حفظ الدرس وتسجيله في شيت «الدروس» بنجاح.')
+                    : (editIdx >= 0 ? 'تم تعديل الدرس بنجاح داخل المنصة.' : 'تم حفظ الدرس بنجاح داخل المنصة.'));
             };
 
             if (fileInput.files && fileInput.files[0]) {
-                let reader = new FileReader();
-                reader.onload = function(evt) {
-                    processSave(evt.target.result, fileInput.files[0].type);
-                };
+                const reader = new FileReader();
+                reader.onload = async function(ev) { await processSave(ev.target.result, fileInput.files[0].type); };
                 reader.readAsDataURL(fileInput.files[0]);
             } else {
-                processSave(null, null);
+                await processSave(null, null);
             }
         }
 
@@ -767,19 +1017,43 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             switchTeacherTab({ currentTarget: document.querySelector('.t-tab-btn') }, 't-lessons');
         }
 
-        function addStudent(e) {
+        async function addStudent(e) {
             e.preventDefault();
-            let name = document.getElementById("stu-name").value.trim();
-            let grade = document.getElementById("stu-grade").value;
-            let pass = document.getElementById("stu-pass").value.trim();
-            db.students.push({ name, grade, pass });
-            localStorage.setItem('ms_rahma_academy_db', JSON.stringify(db));
-            alert("تم إضافة الطالبة بنجاح!");
-            logActivity('تم إضافة طالبة: ' + name);
-            document.getElementById("stu-name").value = "";
-            document.getElementById("stu-pass").value = "";
+            const nameEl = document.getElementById('stu-name');
+            const gradeEl = document.getElementById('stu-grade');
+            const passEl = document.getElementById('stu-pass');
+            const name = (nameEl.value || '').trim();
+            const grade = gradeEl.value;
+            const pass = (passEl.value || '').trim();
+
+            if (!name || !grade || !pass) {
+                alert('من فضلك أكّدي اسم الطالبة والمرحلة وكلمة المرور.');
+                return;
+            }
+            const duplicate = db.students.find(s => (s.name || '').trim() === name && s.grade === grade);
+            if (duplicate) {
+                alert('هذه الطالبة موجودة بالفعل في نفس المرحلة.');
+                return;
+            }
+
+            const student = { id: makeStudentId(), name, grade, pass };
+            db.students.push(student);
+            persist();
             renderStudentsList();
             renderTeacherNotesTab();
+
+            if (cloudEnabled()) {
+                const result = await syncStudentToCloud(student);
+                if (!result || !result.ok) {
+                    alert('تمت إضافة الطالبة داخل المنصة، لكن لم يتم تحديث شيت الطالبات.\n\nالسبب: ' + (result?.error || 'تعذر الاتصال بالشيت') + '\n\nلم يتم حذف الطالبة من المنصة حتى لا تضيع البيانات.');
+                    return;
+                }
+            }
+
+            nameEl.value = '';
+            passEl.value = '';
+            alert(cloudEnabled() ? 'تم إضافة الطالبة وتسجيلها في شيت «الطالبات» بنجاح.' : 'تم إضافة الطالبة بنجاح داخل المنصة.');
+            logActivity('تم إضافة طالبة: ' + name);
         }
 
         function getStudentLevel(avg){ return avg>=90?'🌟 متفوقة':avg>=75?'🟢 جيد جدًا':avg>=50?'🟡 متوسط':'🔴 يحتاج متابعة'; }
@@ -789,7 +1063,7 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             if (!container) return;
             let search=(searchText || document.getElementById('student-search')?.value || '').trim().toLowerCase();
             let grade=document.getElementById('student-grade-filter')?.value || '';
-            let list=db.students.filter(s => (!search || s.name.toLowerCase().includes(search)) && (!grade || s.grade===grade));
+            let list=db.students.filter(s => (!search || String(s.name || '').toLowerCase().includes(search)) && (!grade || s.grade===grade));
             container.innerHTML = list.length ? '' : '<p style="color:var(--text-muted);">لا توجد طالبات مطابقة.</p>';
             list.forEach((s) => {
                 let idx=db.students.indexOf(s);
@@ -799,8 +1073,17 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             });
         }
 
-        function deleteStudent(idx) {
-            let removedName = db.students[idx]?.name || 'غير معروفة';
+        async function deleteStudent(idx) {
+            if(!confirm('هل أنتِ متأكدة من حذف هذه الطالبة؟')) return;
+            const student = db.students[idx];
+            const removedName = student?.name || 'غير معروفة';
+            if(cloudEnabled() && student){
+                const result = await cloudPost({action:'deleteStudent', studentId:student.id, studentName:student.name, grade:student.grade});
+                if(!result || !result.ok){
+                    alert('تعذر حذف الطالبة من الشيت. لم يتم حذفها من المنصة.\n\nالسبب: ' + (result?.error || 'تعذر الاتصال بالشيت'));
+                    return;
+                }
+            }
             db.students.splice(idx, 1);
             localStorage.setItem('ms_rahma_academy_db', JSON.stringify(db));
             renderStudentsList();
@@ -824,6 +1107,7 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
                         </div>
                         <div style="display:flex; gap:0.5rem;">
                             <button class="btn btn-warning" style="padding:0.4rem 1rem; font-size:0.85rem;" onclick="editLesson(${idx})">✏ تعديل الدرس</button>
+                            <button class="btn btn-success" style="padding:0.4rem 1rem; font-size:0.85rem;" onclick="openLessonAccessModal(${idx})">🔑 أكواد الطالبات</button>
                             <button class="btn btn-danger" style="padding:0.4rem 1rem; font-size:0.85rem;" onclick="deleteLesson(${idx})">🗑 حذف تماماً</button>
                         </div>
                     </div>
@@ -831,14 +1115,118 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             });
         }
 
-        function deleteLesson(idx) {
-            if (confirm("هل أنتِ متأكدة من حذف هذا الدرس؟")) {
-                db.lessons.splice(idx, 1);
-                localStorage.setItem('ms_rahma_academy_db', JSON.stringify(db));
-                renderTeacherManage();
+        async function deleteLesson(idx) {
+            if (!confirm("هل أنتِ متأكدة من حذف هذا الدرس؟")) return;
+            const lesson = db.lessons[idx];
+            if(cloudEnabled()){
+                const result = await deleteLessonFromCloud(lesson);
+                if(!result || !result.ok){
+                    alert('تعذر حذف الدرس من الشيت. لم يتم حذف النسخة المحلية.\n\nالسبب: ' + (result?.error || 'تعذر الاتصال بالشيت'));
+                    return;
+                }
             }
+            db.lessons.splice(idx, 1);
+            localStorage.setItem('ms_rahma_academy_db', JSON.stringify(db));
+            renderTeacherManage();
+            logActivity('تم حذف الدرس: ' + (lesson?.title || 'غير معروف'));
         }
 
+        function normalizeCode(v){ return String(v || '').trim().toUpperCase(); }
+        function makeLessonCode(){
+            const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+            let code='';
+            for(let i=0;i<6;i++) code += chars[Math.floor(Math.random()*chars.length)];
+            return code;
+        }
+        function accessKey(student, lesson){ return (student.id || student.name) + '::' + lesson.title; }
+        function getLessonAccess(student, lesson){
+            const key=accessKey(student, lesson);
+            return db.lessonAccess[key] || null;
+        }
+        function ensureLessonCode(student, lesson){
+            const key=accessKey(student, lesson);
+            if(!db.lessonAccess[key]) db.lessonAccess[key]={studentId:student.id||student.name, studentName:student.name, lessonTitle:lesson.title, code:makeLessonCode(), unlocked:false, unlockedAt:null};
+            if(!db.lessonAccess[key].code) db.lessonAccess[key].code=makeLessonCode();
+            // إرسال/تحديث الكود في الشيت بدون تعطيل المنصة.
+            syncLessonCodeToCloud(student, lesson, db.lessonAccess[key]);
+            return db.lessonAccess[key];
+        }
+        function isLessonUnlocked(student, lesson){
+            const a=getLessonAccess(student,lesson);
+            return !!(a && a.unlocked);
+        }
+        function openLessonAccessModal(globalIdx){
+            const lesson=db.lessons[globalIdx];
+            if(!lesson) return;
+            let html=`<div class="access-modal-card"><div class="access-modal-head"><h3>🔑 أكواد الطالبات — ${lesson.title}</h3><button class="btn btn-secondary" onclick="closeLessonAccessModal()">إغلاق</button></div><p class="access-note">كل طالبة لها كود مختلف لهذا الدرس. بعد إدخال الكود مرة واحدة يظل الدرس مفتوحًا للطالبة.</p><div class="access-actions"><button class="btn btn-success" onclick="generateAllLessonCodes(${globalIdx})">⚡ إنشاء أكواد الناقص</button><button class="btn btn-secondary" onclick="copyAllLessonCodes(${globalIdx})">📋 نسخ الأكواد</button></div><div class="access-table"><div class="access-row access-header"><span>الطالبة</span><span>الكود</span><span>الحالة</span><span>إجراء</span></div>`;
+            db.students.filter(st=>st.grade===lesson.grade).forEach(st=>{
+                const a=ensureLessonCode(st,lesson);
+                html+=`<div class="access-row"><span>${st.name}</span><span><code>${a.code}</code></span><span>${a.unlocked?'🔓 مفتوح':'🔒 لم يُفتح'}</span><span><button class="btn btn-success mini-btn" onclick="copyLessonCode('${String(a.code).replace(/'/g,"\\'")}')">📋 نسخ</button></span></div>`;
+            });
+            html+=`</div></div>`;
+            document.getElementById('lesson-access-modal').innerHTML=html;
+            document.getElementById('lesson-access-modal').classList.remove('hidden');
+            persist();
+        }
+        function closeLessonAccessModal(){ document.getElementById('lesson-access-modal').classList.add('hidden'); }
+        function copyLessonCode(code){ navigator.clipboard?.writeText(code).then(()=>alert('تم نسخ الكود: '+code)).catch(()=>prompt('انسخي الكود:',code)); }
+        function copyAllLessonCodes(idx){
+            const lesson=db.lessons[idx]; if(!lesson) return;
+            const rows=db.students.filter(st=>st.grade===lesson.grade).map(st=>{const a=ensureLessonCode(st,lesson); return `${st.name}\t${a.code}`;});
+            const text=`${lesson.title}\n${rows.join('\n')}`;
+            navigator.clipboard?.writeText(text).then(()=>alert('تم نسخ أكواد جميع الطالبات.')).catch(()=>prompt('انسخي القائمة:',text));
+            persist();
+        }
+        function generateAllLessonCodes(idx){
+            const lesson=db.lessons[idx]; if(!lesson) return;
+            db.students.filter(st=>st.grade===lesson.grade).forEach(st=>ensureLessonCode(st,lesson));
+            persist(); openLessonAccessModal(idx); alert('تم إنشاء الأكواد الناقصة لكل طالبات المرحلة.');
+        }
+        async function requestLessonAccess(globalIdx){
+            const lesson=db.lessons[globalIdx];
+            if(!lesson || !currentUser || currentUser.role!=='student') return false;
+            const student=db.students.find(st=>st.name===currentUser.name && st.grade===currentUser.grade);
+            if(!student) return false;
+            if(isLessonUnlocked(student,lesson)){ openStudentLesson(globalIdx); return true; }
+
+            const a=ensureLessonCode(student,lesson);
+            const entered=prompt(`🔒 الدرس «${lesson.title}» مغلق
+
+أدخلي كود هذا الدرس الذي أرسلته لكِ مس رحمة:`);
+            if(entered===null) return false;
+
+            // عند وجود الربط السحابي، الشيت هو مصدر التحقق والتسجيل.
+            if(cloudEnabled()){
+                const result = await cloudVerifyAndLogLesson(student, lesson, entered);
+                if(result && result.ok && result.valid){
+                    a.unlocked=true;
+                    a.unlockedAt=result.unlockedAt || new Date().toISOString();
+                    a.code=result.code || a.code;
+                    persist();
+                    syncLessonCodeToCloud(student, lesson, a);
+                    logActivity(`تم فتح الدرس ${lesson.title} للطالبة ${student.name} — تم تسجيل الاستخدام في الشيت`);
+                    alert('🔓 تم فتح الدرس وتسجيل وقت الاستخدام في الشيت بنجاح.');
+                    openStudentLesson(globalIdx,true);
+                    return true;
+                }
+                if(result && result.ok && result.valid === false){
+                    alert('❌ الكود غير صحيح لهذا الدرس أو لهذا الحساب.');
+                    return false;
+                }
+                alert('⚠️ تعذر الاتصال بالشيت حالياً. تأكدي من نشر رابط الربط، ثم حاولي مرة أخرى.');
+                return false;
+            }
+
+            // وضع احتياطي محلي إذا لم يتم إعداد رابط الشيت بعد.
+            if(normalizeCode(entered)===normalizeCode(a.code)){
+                a.unlocked=true; a.unlockedAt=new Date().toISOString();
+                persist(); logActivity(`تم فتح الدرس ${lesson.title} للطالبة ${student.name}`);
+                alert('🔓 تم فتح الدرس بنجاح. (الوضع المحلي — لم يتم الربط بالشيت بعد)');
+                openStudentLesson(globalIdx,true); return true;
+            }
+            alert('❌ الكود غير صحيح لهذا الدرس أو لهذا الحساب.');
+            return false;
+        }
         function renderGradesPortal() {
             let gridContainer = document.getElementById("grades-grid-container");
             gridContainer.innerHTML = "";
@@ -874,9 +1262,11 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             } else {
                 filteredLessons.forEach((l) => {
                     let globalIdx = db.lessons.indexOf(l);
+                    const unlocked = currentUser.role==='teacher' || isLessonUnlocked(db.students.find(st=>st.name===currentUser.name && st.grade===currentUser.grade), l);
                     listContainer.innerHTML += `
-                        <div class="lesson-btn-item" onclick="openStudentLesson(${globalIdx})">
-                            📚 ${l.title}
+                        <div class="lesson-btn-item" onclick="${currentUser.role==='teacher' ? `openStudentLesson(${globalIdx})` : `handleLessonClick(${globalIdx})`}">
+                            ${unlocked ? '🔓' : '🔒'} ${l.title}
+                            ${unlocked ? '<span class="lesson-status">مفتوح</span>' : '<span class="lesson-status locked-status">يتطلب كود</span>'}
                         </div>
                     `;
                 });
@@ -886,6 +1276,13 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             document.getElementById("lessons-list-view").classList.remove("hidden");
         }
 
+        function handleLessonClick(globalIdx){
+            const lesson=db.lessons[globalIdx];
+            const student=db.students.find(st=>st.name===currentUser.name && st.grade===currentUser.grade);
+            if(student && isLessonUnlocked(student,lesson)) openStudentLesson(globalIdx);
+            else requestLessonAccess(globalIdx);
+        }
+
         function backToGradesView() { renderGradesPortal(); }
         function backToLessonsList() {
             if (examTimer) clearInterval(examTimer);
@@ -893,7 +1290,12 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             document.getElementById("lessons-list-view").classList.remove("hidden");
         }
 
-        function openStudentLesson(globalIdx) {
+        function openStudentLesson(globalIdx, bypass=false) {
+            if(currentUser && currentUser.role==='student' && !bypass){
+                const lessonCheck=db.lessons[globalIdx];
+                const studentCheck=db.students.find(st=>st.name===currentUser.name && st.grade===currentUser.grade);
+                if(studentCheck && !isLessonUnlocked(studentCheck,lessonCheck)){ requestLessonAccess(globalIdx); return; }
+            }
             activeLessonIndex = globalIdx;
             let lesson = db.lessons[globalIdx];
             document.getElementById("current-lesson-main-title").innerText = lesson.title;
@@ -901,18 +1303,20 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
 
             let mediaBox = document.getElementById("s-lesson-media");
             mediaBox.innerHTML = "";
-            if (lesson.fileData) {
+            if (lesson.fileUrl || lesson.fileData) {
                 const fileExt = lesson.fileType === "application/pdf" ? "pdf" : (lesson.fileType.split("/")[1] || "file");
                 const safeTitle = (lesson.title || "ملف الدرس").replace(/[\\/:*?"<>|]/g, "_");
+                const fileLink = lesson.fileUrl || lesson.fileData;
+                const linkMode = lesson.fileUrl ? `target="_blank" rel="noopener noreferrer"` : `download="${safeTitle}.${fileExt}"`;
                 mediaBox.innerHTML = `
                     <div class="lesson-download-card">
                         <div class="lesson-download-icon">📎</div>
                         <div class="lesson-download-info">
-                            <strong>ملف الدرس جاهز للتحميل</strong>
-                            <span>${lesson.fileType === "application/pdf" ? "ملف PDF" : "مرفق الدرس"} — لن يتم فتحه داخل المنصة</span>
+                            <strong>ملف الدرس جاهز</strong>
+                            <span>${lesson.fileType === "application/pdf" ? "ملف PDF" : "مرفق الدرس"}</span>
                         </div>
-                        <a class="btn btn-success lesson-download-btn" href="${lesson.fileData}" download="${safeTitle}.${fileExt}">
-                            ⬇️ تحميل الملف
+                        <a class="btn btn-success lesson-download-btn" href="${fileLink}" ${linkMode}>
+                            📄 فتح ملف الدرس
                         </a>
                     </div>
                 `;
@@ -1333,6 +1737,7 @@ input,textarea,select{width:100%;padding:.9rem 1rem;border:1.5px solid var(--bor
             };
             reader.readAsText(file);
         }
+        checkCloudStatus();
     </script>
 </body>
 </html>
